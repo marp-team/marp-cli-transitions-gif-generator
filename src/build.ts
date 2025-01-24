@@ -2,7 +2,7 @@ import fsPromise from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import url from 'node:url'
-import { createFFmpeg } from '@ffmpeg/ffmpeg'
+import { FFmpeg } from '@ffmpeg.wasm/main'
 import { marpCli } from '@marp-team/marp-cli'
 import puppeteer from 'puppeteer'
 import type { Browser } from 'puppeteer'
@@ -17,6 +17,7 @@ const settings = {
 } as const
 
 const transitions = [
+  'none', // Warming up
   'clockwise',
   'counterclockwise',
   'cover',
@@ -67,7 +68,7 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 const usePuppeteer = async (callback: (browser: Browser) => Promise<void>) => {
   const browser = await puppeteer.launch({
     headless: true,
-    args: ['--test-type', '--enable-blink-features=ViewTransition'],
+    args: ['--test-type'],
   })
 
   try {
@@ -84,7 +85,7 @@ usePuppeteer(async (browser) => {
 
   // Set up tmp directory
   const tmpDir = await fsPromise.mkdtemp(
-    path.join(os.tmpdir(), 'marp-cli-script-transitions-gif')
+    path.join(os.tmpdir(), 'marp-cli-script-transitions-gif'),
   )
   const tmpMd = path.resolve(tmpDir, './.transition.md')
   const tmpHtml = path.resolve(tmpDir, './.transition.html')
@@ -92,7 +93,7 @@ usePuppeteer(async (browser) => {
   try {
     for (const transition of transitions) {
       console.log(
-        `########## Generate GIF for ${transition} transition ##########`
+        `########## Generate GIF for ${transition} transition ##########`,
       )
 
       // Generate HTML
@@ -175,8 +176,7 @@ usePuppeteer(async (browser) => {
           ]
       })()
 
-      const ffmpeg = createFFmpeg()
-      await ffmpeg.load()
+      const ffmpeg = await FFmpeg.create({ core: '@ffmpeg.wasm/core-mt' })
 
       try {
         for (let frame = 0; frame < frames; frame += 1) {
@@ -188,10 +188,9 @@ usePuppeteer(async (browser) => {
               .toString()
               .padStart(10, '0')}.png`
 
-            ffmpeg.FS(
-              'writeFile',
+            ffmpeg.fs.writeFile(
               outputLocalPath,
-              Uint8Array.from(Buffer.from(data, 'base64'))
+              Uint8Array.from(Buffer.from(data, 'base64')),
             )
           }
         }
@@ -205,7 +204,7 @@ usePuppeteer(async (browser) => {
           'frame-%010d.png',
           '-c:v',
           'copy',
-          'raw.mkv'
+          'raw.mkv',
         )
 
         console.log('# Generating palette for GIF...')
@@ -216,7 +215,7 @@ usePuppeteer(async (browser) => {
           'raw.mkv',
           '-vf',
           `${scale},palettegen`,
-          'palette.png'
+          'palette.png',
         )
 
         console.log('# Generating animation GIF...')
@@ -228,13 +227,13 @@ usePuppeteer(async (browser) => {
           '-lavfi',
           `${scale},fps=${settings.fps} [x]; [x][1:v] paletteuse`,
           '-y',
-          'animation.gif'
+          'animation.gif',
         )
 
         console.log(`# Outputting to ${transition}.gif...`)
         await fsPromise.writeFile(
           path.resolve(outDir, `${transition}.gif`),
-          ffmpeg.FS('readFile', 'animation.gif')
+          ffmpeg.fs.readFile('animation.gif'),
         )
       } finally {
         ffmpeg.exit()
